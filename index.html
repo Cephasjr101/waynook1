@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>waynook</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #273549;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #e94560; --accent2: #38bdf8;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 1.4rem; background: var(--panel); border-bottom: 1px solid #334155; }
+  header .logo { font-weight: 800; font-size: 1.25rem; color: var(--accent); letter-spacing: 0.5px; }
+  header .who { color: var(--muted); font-size: 0.9rem; }
+  header .who b { color: var(--text); }
+  main { max-width: 980px; margin: 1.5rem auto; padding: 0 1rem 3rem; }
+  .card { background: var(--panel); border: 1px solid #334155; border-radius: 12px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+  .card h3 { margin: 0 0 0.6rem; font-size: 1.02rem; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.85rem; }
+  .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .grow { flex: 1; min-width: 150px; }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0.55rem 0 0.2rem; }
+  input, select { width: 100%; padding: 0.5rem 0.6rem; border-radius: 8px; border: 1px solid #475569; background: var(--panel2); color: var(--text); font-size: 0.92rem; }
+  input:focus, select:focus { outline: 2px solid var(--accent2); border-color: transparent; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 0.55rem 1rem; font-size: 0.9rem; font-weight: 600; background: var(--accent2); color: #082f49; }
+  button:hover { filter: brightness(1.1); }
+  button.primary { background: var(--accent); color: #fff; }
+  button.ghost { background: transparent; border: 1px solid #475569; color: var(--text); }
+  button.small { padding: 0.35rem 0.7rem; font-size: 0.8rem; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+  .b-open { background: #164e63; color: #67e8f9; }
+  .b-assigned { background: #713f12; color: #fde68a; }
+  .b-in_transit { background: #4c1d95; color: #d8b4fe; }
+  .b-delivered { background: #14532d; color: #86efac; }
+  .b-cancelled, .b-rejected { background: #7f1d1d; color: #fca5a5; }
+  .b-available { background: #14532d; color: #86efac; }
+  .b-pending { background: #713f12; color: #fde68a; }
+  .b-accepted { background: #14532d; color: #86efac; }
+  .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .tabs button { background: var(--panel); color: var(--muted); border: 1px solid #334155; }
+  .tabs button.active { background: var(--accent); color: #fff; border-color: transparent; }
+  .item { border-top: 1px solid #334155; padding: 0.8rem 0; }
+  .item:first-of-type { border-top: none; }
+  .kv { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin: 0.35rem 0; font-size: 0.88rem; }
+  .kv span b { color: var(--muted); font-weight: 600; }
+  .sub { background: var(--panel2); border-radius: 10px; padding: 0.7rem 0.9rem; margin-top: 0.7rem; }
+  .sub h4 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  #toast { position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%); background: var(--bad); color: #fff; padding: 0.7rem 1.2rem; border-radius: 10px; display: none; max-width: 90vw; z-index: 10; }
+  #toast.ok { background: var(--ok); color: #052e16; }
+  .auth-wrap { max-width: 420px; margin: 8vh auto 0; }
+  .auth-wrap .card h2 { margin-top: 0; }
+  .demo { margin-top: 0.9rem; padding-top: 0.9rem; border-top: 1px dashed #475569; }
+  .score { color: var(--accent2); font-weight: 700; }
+  .right { margin-left: auto; }
+  @media (max-width: 640px) { .kv { gap: 0.3rem 0.9rem; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">waynook</div>
+  <div class="who" id="who"></div>
+</header>
+<main id="app"><p class="muted">Loading...</p></main>
+<div id="toast"></div>
+
+<script>
+// ---------- state ----------
+let token = localStorage.getItem("lm_token") || null;
+let me = null;
+let view = { screen: "auth", tab: null, loads: [], trucks: [], browse: [], expanded: {}, bidPlaced: {} };
+
+const EQUIPMENT = ["dry_van", "flatbed", "reefer"];
+const appEl = document.getElementById("app");
+const whoEl = document.getElementById("who");
+
+// ---------- helpers ----------
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function toast(msg, ok) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = ok ? "ok" : "";
+  t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 4000);
+}
+function money(n) { return "$" + Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+function dt(s) { return s ? String(s).replace("T", " ").slice(0, 16) : "-"; }
+function badge(status) { return '<span class="badge b-' + esc(status) + '">' + esc(status.replace("_", " ")) + "</span>"; }
+function naivedt(v) { return v && v.length === 16 ? v + ":00" : v; }
+
+async function api(path, opts) {
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {});
+  if (opts.json !== undefined) headers["Content-Type"] = "application/json";
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(path, {
+    method: opts.method || "GET",
+    headers: headers,
+    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body,
+  });
+  const data = await res.json().catch(() => null);
+  if (res.status === 401 && path !== "/auth/login") { logout(false); throw new Error((data && data.detail) || "Session expired"); }
+  if (!res.ok) throw new Error((data && data.detail) || ("Request failed (" + res.status + ")"));
+  return data;
+}
+
+// ---------- auth ----------
+async function doLogin() {
+  const email = document.getElementById("l_email").value.trim();
+  const password = document.getElementById("l_pass").value;
+  try {
+    const body = new URLSearchParams({ username: email, password: password });
+    const res = await fetch("/auth/login", { method: "POST", body: body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Login failed");
+    token = data.access_token;
+    localStorage.setItem("lm_token", token);
+    await boot();
+    toast("Welcome back!", true);
+  } catch (e) { toast(e.message); }
+}
+function fillDemo(role) {
+  document.getElementById("l_email").value = role + "@demo.io";
+  document.getElementById("l_pass").value = "password123";
+}
+async function doRegister() {
+  const payload = {
+    email: document.getElementById("r_email").value.trim(),
+    password: document.getElementById("r_pass").value,
+    role: document.getElementById("r_role").value,
+    company_name: document.getElementById("r_company").value.trim(),
+  };
+  try {
+    await api("/auth/register", { method: "POST", json: payload });
+    document.getElementById("r_email").value = "";
+    showAuth("login");
+    toast("Account created - you can log in now.", true);
+  } catch (e) { toast(e.message); }
+}
+function logout(showMsg) {
+  token = null; me = null;
+  localStorage.removeItem("lm_token");
+  view.screen = "auth";
+  render();
+  if (showMsg !== false) toast("Logged out.");
+}
+
+// ---------- data loading ----------
+async function boot() {
+  if (!token) { view.screen = "auth"; render(); return; }
+  try {
+    me = await api("/me");
+    view.screen = "app";
+    view.tab = me.role === "shipper" ? "loads" : "browse";
+    await refresh();
+  } catch (e) { /* api() already logged out on 401 */ }
+}
+async function refresh() {
+  if (me.role === "shipper") {
+    const all = await api("/loads");
+    view.loads = all.filter(l => l.shipper_id === me.id);
+  } else {
+    view.browse = await api("/loads?status=open");
+    const allTrucks = await api("/trucks");
+    view.trucks = allTrucks.filter(t => t.carrier_id === me.id);
+  }
+  render();
+}
+
+// ---------- expand/collapse detail panels ----------
+async function toggleMatches(loadId) {
+  const key = loadId + ":matches";
+  if (view.expanded[key]) { delete view.expanded[key]; render(); return; }
+  view.expanded[key] = await api("/loads/" + loadId + "/matches");
+  render();
+}
+async function toggleOffers(loadId) {
+  const key = loadId + ":offers";
+  if (view.expanded[key]) { delete view.expanded[key]; render(); return; }
+  try {
+    view.expanded[key] = await api("/loads/" + loadId + "/offers");
+  } catch (e) { view.expanded[key] = []; }
+  render();
+}
+
+// ---------- shipper actions ----------
+async function postLoad() {
+  const v = id => document.getElementById(id).value;
+  const payload = {
+    title: v("ld_title"), origin_city: v("ld_oc"), origin_lat: +v("ld_ola"), origin_lng: +v("ld_olo"),
+    dest_city: v("ld_dc"), dest_lat: +v("ld_dla"), dest_lng: +v("ld_dlo"),
+    equipment_type: v("ld_eq"), weight_kg: +v("ld_w"), pickup_time: naivedt(v("ld_pt")),
+  };
+  try {
+    await api("/loads", { method: "POST", json: payload });
+    view.tab = "loads";
+    await refresh();
+    toast("Load posted.", true);
+  } catch (e) { toast(e.message); }
+}
+async function acceptOffer(id) { await act("/offers/" + id + "/accept", "Offer accepted."); }
+async function rejectOffer(id) { await act("/offers/" + id + "/reject", "Offer rejected."); }
+async function pickupLoad(id) { await act("/loads/" + id + "/pickup", "Picked up - in transit."); }
+async function deliverLoad(id) { await act("/loads/" + id + "/deliver", "Delivered!"); }
+async function cancelLoad(id) {
+  if (!confirm("Cancel this load? Pending offers will be rejected.")) return;
+  await act("/loads/" + id, "Load cancelled.", "DELETE");
+}
+async function act(path, msg, method) {
+  try {
+    await api(path, { method: method || "POST" });
+    view.expanded = {};
+    await refresh();
+    toast(msg, true);
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- carrier actions ----------
+async function postTruck() {
+  const v = id => document.getElementById(id).value;
+  const payload = {
+    name: v("tk_name"), equipment_type: v("tk_eq"), capacity_kg: +v("tk_cap"),
+    current_lat: +v("tk_la"), current_lng: +v("tk_lo"),
+    available_from: naivedt(v("tk_af")), available_until: naivedt(v("tk_au")),
+  };
+  try {
+    await api("/trucks", { method: "POST", json: payload });
+    view.tab = "trucks";
+    await refresh();
+    toast("Truck registered.", true);
+  } catch (e) { toast(e.message); }
+}
+async function placeBid(loadId) {
+  const amount = +document.getElementById("bid_amount_" + loadId).value;
+  const truckSel = document.getElementById("bid_truck_" + loadId);
+  const truckId = truckSel && truckSel.value ? +truckSel.value : null;
+  try {
+    await api("/loads/" + loadId + "/offers", { method: "POST", json: { amount: amount, truck_id: truckId } });
+    view.bidPlaced[loadId] = true;
+    render();
+    toast("Bid placed.", true);
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- rendering ----------
+function showAuth(tab) {
+  view.screen = "auth";
+  view.authTab = tab || "login";
+  render();
+}
+function setTab(tab) { view.tab = tab; render(); }
+
+function render() {
+  whoEl.innerHTML = me
+    ? esc(me.company_name || me.email) + " &middot; <b>" + esc(me.role) + "</b> &nbsp; <button class='ghost small' onclick='logout()'>Log out</button>"
+    : "";
+  if (view.screen === "auth") return renderAuth();
+  renderApp();
+}
+
+function renderAuth() {
+  const isLogin = (view.authTab || "login") === "login";
+  appEl.innerHTML =
+    '<div class="auth-wrap"><div class="card">' +
+    "<h2>" + (isLogin ? "Log in" : "Create account") + "</h2>" +
+    '<div class="tabs">' +
+    "<button class='" + (isLogin ? "active" : "") + "' onclick='showAuth(&#39;login&#39;)'>Log in</button>" +
+    "<button class='" + (!isLogin ? "active" : "") + "' onclick='showAuth(&#39;register&#39;)'>Register</button>" +
+    "</div>" +
+    (isLogin
+      ? "<label>Email</label><input id='l_email' type='email' placeholder='you@company.com'>" +
+        "<label>Password</label><input id='l_pass' type='password' placeholder='password'>" +
+        "<div class='row' style='margin-top:1rem'><button class='primary grow' onclick='doLogin()'>Log in</button></div>" +
+        "<div class='demo small muted'>Demo accounts (after running seed.py): " +
+        "<button class='ghost small' onclick='fillDemo(&#39;shipper&#39;)'>shipper@demo.io</button> " +
+        "<button class='ghost small' onclick='fillDemo(&#39;carrier&#39;)'>carrier@demo.io</button>" +
+        "<div>password: password123</div></div>"
+      : "<label>Email</label><input id='r_email' type='email' placeholder='you@company.com'>" +
+        "<label>Password (min 8 chars)</label><input id='r_pass' type='password'>" +
+        "<label>I am a</label><select id='r_role'><option value='shipper'>Shipper (I have freight)</option><option value='carrier'>Carrier (I have trucks)</option></select>" +
+        "<label>Company name</label><input id='r_company' placeholder='Acme Manufacturing'>" +
+        "<div class='row' style='margin-top:1rem'><button class='primary grow' onclick='doRegister()'>Register</button></div>") +
+    "</div>" +
+    "<p class='muted small' style='text-align:center'>API docs at <a style='color:var(--accent2)' href='/docs'>/docs</a></p></div>";
+}
+
+function loadCard(l) {
+  const mKey = l.id + ":matches", oKey = l.id + ":offers";
+  const matches = view.expanded[mKey], offers = view.expanded[oKey];
+  let actions = "";
+  if (l.status === "open") {
+    actions =
+      "<button class='small' onclick='toggleMatches(" + l.id + ")'>" + (matches ? "Hide matches" : "Find matches") + "</button> " +
+      "<button class='small' onclick='toggleOffers(" + l.id + ")'>" + (offers ? "Hide offers" : "Offers") + "</button> " +
+      "<button class='small ghost' onclick='cancelLoad(" + l.id + ")'>Cancel</button>";
+  } else if (l.status === "assigned") {
+    actions = "<button class='small primary' onclick='pickupLoad(" + l.id + ")'>Confirm pickup</button> " +
+              "<button class='small' onclick='toggleOffers(" + l.id + ")'>" + (offers ? "Hide offers" : "Offers") + "</button>";
+  } else if (l.status === "in_transit") {
+    actions = "<button class='small primary' onclick='deliverLoad(" + l.id + ")'>Confirm delivery</button>";
+  }
+  let html =
+    "<div class='item'>" +
+    "<div class='row'><h3 style='margin:0'>" + esc(l.title || "Load #" + l.id) + "</h3>" + badge(l.status) + "</div>" +
+    "<div class='kv'>" +
+    "<span><b>Route:</b> " + esc(l.origin_city) + " &rarr; " + esc(l.dest_city) + "</span>" +
+    "<span><b>Equipment:</b> " + esc(l.equipment_type) + "</span>" +
+    "<span><b>Weight:</b> " + Number(l.weight_kg).toLocaleString() + " kg</span>" +
+    "<span><b>Pickup:</b> " + dt(l.pickup_time) + "</span>" +
+    "</div>" +
+    (actions ? "<div class='row' style='margin-top:0.4rem'>" + actions + "</div>" : "");
+  if (matches) {
+    html += "<div class='sub'><h4>Matched trucks (ranked)</h4>";
+    if (!matches.length) html += "<p class='muted small'>No compatible trucks right now.</p>";
+    matches.forEach(m => {
+      html += "<div class='kv'><span><b>" + esc(m.truck.name || "Truck #" + m.truck.id) + "</b></span>" +
+        "<span><b>Capacity:</b> " + Number(m.truck.capacity_kg).toLocaleString() + " kg</span>" +
+        "<span><b>Distance:</b> " + m.distance_km + " km</span>" +
+        "<span class='score'>Score: " + m.score + "</span></div>";
+    });
+    html += "</div>";
+  }
+  if (offers) {
+    html += "<div class='sub'><h4>Offers</h4>";
+    if (!offers.length) html += "<p class='muted small'>No offers yet.</p>";
+    offers.forEach(o => {
+      html += "<div class='kv'><span><b>Bid:</b> " + money(o.amount) + "</span>" +
+        "<span><b>Carrier #:</b> " + o.carrier_id + "</span>" + badge(o.status);
+      if (o.status === "pending" && l.status === "open") {
+        html += "<span class='right'><button class='small primary' onclick='acceptOffer(" + o.id + ")'>Accept</button> " +
+                "<button class='small ghost' onclick='rejectOffer(" + o.id + ")'>Reject</button></span>";
+      }
+      html += "</div>";
+    });
+    html += "</div>";
+  }
+  return html + "</div>";
+}
+
+function renderShipper() {
+  const tabs =
+    "<div class='tabs'>" +
+    "<button class='" + (view.tab === "loads" ? "active" : "") + "' onclick='setTab(&#39;loads&#39;)'>My Loads</button>" +
+    "<button class='" + (view.tab === "postload" ? "active" : "") + "' onclick='setTab(&#39;postload&#39;)'>Post a Load</button>" +
+    "</div>";
+  if (view.tab === "postload") {
+    return tabs + "<div class='card'><h3>Post a load</h3>" +
+      "<div class='row'><div class='grow'><label>Title</label><input id='ld_title' placeholder='Steel coils'></div>" +
+      "<div class='grow'><label>Equipment</label><select id='ld_eq'>" + EQUIPMENT.map(e => "<option>" + e + "</option>").join("") + "</select></div>" +
+      "<div class='grow'><label>Weight (kg)</label><input id='ld_w' type='number' value='20000'></div></div>" +
+      "<div class='row'><div class='grow'><label>Origin city</label><input id='ld_oc' value='Chicago, IL'></div>" +
+      "<div class='grow'><label>Origin lat</label><input id='ld_ola' type='number' step='any' value='41.8781'></div>" +
+      "<div class='grow'><label>Origin lng</label><input id='ld_olo' type='number' step='any' value='-87.6298'></div></div>" +
+      "<div class='row'><div class='grow'><label>Destination city</label><input id='ld_dc' value='Columbus, OH'></div>" +
+      "<div class='grow'><label>Dest lat</label><input id='ld_dla' type='number' step='any' value='39.9612'></div>" +
+      "<div class='grow'><label>Dest lng</label><input id='ld_dlo' type='number' step='any' value='-82.9988'></div></div>" +
+      "<label>Pickup time</label><input id='ld_pt' type='datetime-local'>" +
+      "<div class='row' style='margin-top:1rem'><button class='primary' onclick='postLoad()'>Post load</button></div></div>";
+  }
+  const list = view.loads.length
+    ? view.loads.map(loadCard).join("")
+    : "<p class='muted'>No loads yet. Post your first load!</p>";
+  return tabs + "<div class='card'><h3>My Loads (" + view.loads.length + ")</h3>" + list + "</div>";
+}
+
+function renderCarrier() {
+  const tabs =
+    "<div class='tabs'>" +
+    "<button class='" + (view.tab === "browse" ? "active" : "") + "' onclick='setTab(&#39;browse&#39;)'>Browse Loads</button>" +
+    "<button class='" + (view.tab === "trucks" ? "active" : "") + "' onclick='setTab(&#39;trucks&#39;)'>My Trucks (" + view.trucks.length + ")</button>" +
+    "<button class='" + (view.tab === "posttruck" ? "active" : "") + "' onclick='setTab(&#39;posttruck&#39;)'>Add Truck</button>" +
+    "</div>";
+  if (view.tab === "posttruck") {
+    return tabs + "<div class='card'><h3>Register a truck</h3>" +
+      "<div class='row'><div class='grow'><label>Name</label><input id='tk_name' placeholder='FL-101'></div>" +
+      "<div class='grow'><label>Equipment</label><select id='tk_eq'>" + EQUIPMENT.map(e => "<option>" + e + "</option>").join("") + "</select></div>" +
+      "<div class='grow'><label>Capacity (kg)</label><input id='tk_cap' type='number' value='24000'></div></div>" +
+      "<div class='row'><div class='grow'><label>Current lat</label><input id='tk_la' type='number' step='any' value='41.75'></div>" +
+      "<div class='grow'><label>Current lng</label><input id='tk_lo' type='number' step='any' value='-87.55'></div></div>" +
+      "<div class='row'><div class='grow'><label>Available from</label><input id='tk_af' type='datetime-local'></div>" +
+      "<div class='grow'><label>Available until</label><input id='tk_au' type='datetime-local'></div></div>" +
+      "<div class='row' style='margin-top:1rem'><button class='primary' onclick='postTruck()'>Add truck</button></div></div>";
+  }
+  if (view.tab === "trucks") {
+    const list = view.trucks.length ? view.trucks.map(t =>
+      "<div class='item'><div class='row'><h3 style='margin:0'>" + esc(t.name || "Truck #" + t.id) + "</h3>" + badge(t.status) + "</div>" +
+      "<div class='kv'><span><b>Equipment:</b> " + esc(t.equipment_type) + "</span>" +
+      "<span><b>Capacity:</b> " + Number(t.capacity_kg).toLocaleString() + " kg</span>" +
+      "<span><b>Location:</b> " + t.current_lat + ", " + t.current_lng + "</span>" +
+      "<span><b>Window:</b> " + dt(t.available_from) + " &rarr; " + dt(t.available_until) + "</span></div></div>"
+    ).join("") : "<p class='muted'>No trucks yet.</p>";
+    return tabs + "<div class='card'><h3>My Trucks</h3>" + list + "</div>";
+  }
+  const list = view.browse.length ? view.browse.map(l => {
+    const myTrucks = view.trucks.filter(t => t.status === "available");
+    const bid = view.bidPlaced[l.id];
+    return "<div class='item'><div class='row'><h3 style='margin:0'>" + esc(l.title || "Load #" + l.id) + "</h3>" + badge(l.status) + "</div>" +
+      "<div class='kv'><span><b>Route:</b> " + esc(l.origin_city) + " &rarr; " + esc(l.dest_city) + "</span>" +
+      "<span><b>Equipment:</b> " + esc(l.equipment_type) + "</span>" +
+      "<span><b>Weight:</b> " + Number(l.weight_kg).toLocaleString() + " kg</span>" +
+      "<span><b>Pickup:</b> " + dt(l.pickup_time) + "</span></div>" +
+      (bid
+        ? "<p class='muted small'>Bid placed - waiting for shipper.</p>"
+        : "<div class='row' style='margin-top:0.4rem;align-items:flex-end'>" +
+          "<div style='width:130px'><label>Bid amount ($)</label><input id='bid_amount_" + l.id + "' type='number' value='1500'></div>" +
+          (myTrucks.length
+            ? "<div style='min-width:160px'><label>Truck (optional)</label><select id='bid_truck_" + l.id + "'><option value=''>Auto-pick</option>" +
+              myTrucks.map(t => "<option value='" + t.id + "'>" + esc(t.name || "#" + t.id) + " (" + esc(t.equipment_type) + ")</option>").join("") + "</select></div>"
+            : "") +
+          "<button class='small primary' onclick='placeBid(" + l.id + ")'>Place bid</button></div>") +
+      "</div>";
+  }).join("") : "<p class='muted'>No open loads right now.</p>";
+  return tabs + "<div class='card'><h3>Open Loads (" + view.browse.length + ")</h3>" + list + "</div>";
+}
+
+function renderApp() {
+  appEl.innerHTML = me.role === "shipper" ? renderShipper() : renderCarrier();
+}
+
+// ---------- boot ----------
+boot();
+</script>
+</body>
+</html>
