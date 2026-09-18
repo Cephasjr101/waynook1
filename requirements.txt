@@ -5,6 +5,7 @@ pydantic>=2.6
 email-validator>=2.0
 httpx>=0.27
 pytest>=8.0
+python-multipart
 
 # Optional: Firebase Auth (server verifies Firebase ID tokens).
 # The app runs fine without it - auth falls back to local JWT.
