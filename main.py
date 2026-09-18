@@ -33,7 +33,11 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "./static"))
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
+from fastapi.staticfiles import StaticFiles
+
+# ... all routers and API routes above ...
+
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 # The multi-page frontend (index / marketplace / post-load / post-truck /
 # dashboard / privacy / terms) is served as flat files from the repo root.
