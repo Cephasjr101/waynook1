@@ -321,6 +321,10 @@
       <h2 id="authTitle">Welcome back, driver.</h2>
       <p class="sub" id="authSub">Sign in to your Waynook dispatch account.</p>
       <input id="regName" class="hidden" type="text" placeholder="Full name" autocomplete="name">
+      <div id="regRoleWrap" class="hidden" style="display:flex;gap:8px;margin-bottom:10px;">
+        <div class="fchip active" data-r="shipper">Shipper (post loads)</div>
+        <div class="fchip" data-r="carrier">Carrier / Driver (haul loads)</div>
+      </div>
       <input id="loginEmail" type="email" placeholder="Email" autocomplete="email">
       <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password">
       <button class="btn" id="loginBtn" style="width:100%;">Sign in</button>
@@ -352,8 +356,13 @@
         </p>
         <h1 id="greeting">Welcome back, <em>driver.</em></h1>
         <p id="greetingSub">Here's what's moving across the board right now.</p>
-        <div style="display:flex;gap:10px;">
-          <button class="btn" data-goto="loads">Post a load</button>
+        </div> style="display:flex;gap:10px;"
+      <select id="ldEquip" style="width:100%;background:#0d1220;color:var(--txt);border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin-bottom:10px;">
+        <option value="dry_van">Dry van</option><option value="flatbed">Flatbed</option>
+        <option value="reefer">Reefer</option><option value="box_truck">Box truck</option>
+        <option value="tanker">Tanker</option>
+      </select>
+      <button class="btn" id="postLoadBtn">Post load</button>
           <button class="ghost" data-goto="agent" style="padding:11px 20px;">Ask the AI dispatcher</button>
         </div>
       </div>
@@ -415,8 +424,8 @@
       <div class="grid2">
         <input id="ldPickup" placeholder="Pickup address / city">
         <input id="ldDropoff" placeholder="Dropoff address / city">
-        <input id="ldWeight" type="number" placeholder="Weight (lbs)">
-        <input id="ldPrice" type="number" placeholder="Offered price ($)">
+        <input id="ldWeight" type="number" placeholder="Weight (kg)">
+        <input id="ldPrice" type="number" placeholder="Offered price (₵)">
       </div>
       <button class="btn" id="postLoadBtn">Post load</button>
       <div class="err" id="loadErr"></div>
@@ -434,9 +443,9 @@
   <section id="mapTab" class="tabpage hidden">
     <div class="panel">
       <h2>Route planner</h2>
-      <div class="row">
-        <input id="mpOrigin" placeholder="Origin (e.g. Accra, Ghana)">
-        <input id="mpDest" placeholder="Destination (e.g. Kumasi, Ghana)">
+      <div><label class="hint">Current city / area</label><input id="ltCity" placeholder="e.g. Accra, Tema, Kumasi…"></div>
+      <div><label class="hint">Capacity (kg)</label><input id="ltCap" type="number" placeholder="e.g. 8000"></div>
+      </div>
       </div>
       <button class="btn" id="routeBtn">Get route &amp; distance</button>
       <p class="hint" id="routeInfo" style="margin-top:12px;"></p>
@@ -651,6 +660,10 @@ const ENDPOINTS  = {
 /* ===================================================================== */
 
 const $ = id => document.getElementById(id);
+const CITY_COORDS = { accra:[5.6037,-0.1870], kumasi:[6.6885,-1.6244], tema:[5.6698,-0.0166], takoradi:[4.8982,-1.7603], tamale:[9.4034,-0.8424], ho:[6.6,0.4667], "cape coast":[5.1053,-1.2466], sunyani:[7.3399,-2.3268] };
+function geocodeCity(addr) { const k = (addr || "").split(",")[0].trim().toLowerCase(); return CITY_COORDS[k] || null; }
+function havKm(a, b, c, d) { const R = 6371, rad = x => x * Math.PI / 180; const h = Math.sin(rad(c - a) / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(rad(d - b) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); }
+let regRole = "shipper";
 let token = localStorage.getItem("waynook_token") || "";
 let history = [];
 let map, polyline, cachedLoads = [];
@@ -700,8 +713,9 @@ function syncAvatar() {
 let isRegister = false;
 $("authSwitch").onclick = e => {
   e.preventDefault();
-  isRegister = !isRegister;
+  isRegister = !isRegister
   $("regName").classList.toggle("hidden", !isRegister);
+  $("regRoleWrap").classList.toggle("hidden", !isRegister);
   $("authTitle").textContent = isRegister ? "Join Waynook." : "Welcome back, driver.";
   $("authSub").textContent = isRegister
     ? "Create your dispatch account in seconds."
@@ -719,7 +733,7 @@ $("loginBtn").onclick = async () => {
       throw new Error("Enter your name");
     const url = API_BASE + (isRegister ? "/auth/register" : ENDPOINTS.login);
     const body = isRegister
-      ? {name: $("regName").value.trim(), email: $("loginEmail").value, password: $("loginPass").value}
+      ? {name: $("regName").value.trim(), email: $("loginEmail").value, password: $("loginPass").value, role: regRole}
       : {email: $("loginEmail").value, password: $("loginPass").value};
     const r = await fetch(url, {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -781,38 +795,25 @@ function loadRowHtml(l) {
     <td><span class="badge ${l.status || "posted"}">${l.status || "posted"}</span></td>
   </tr>`;
 }
-async function loadLoads() {
-  try {
-    const loads = await api(ENDPOINTS.loads);
-    cachedLoads = Array.isArray(loads) ? loads : (loads.items || loads.loads || []);
-    const active = cachedLoads.filter(l => !["delivered","cancelled"].includes(l.status));
-    $("statLoads").textContent = active.length;
-    $("statMiles").textContent = cachedLoads.reduce((s,l) => s + (l.miles || 0), 0).toLocaleString();
-    $("statValue").textContent = "$" + cachedLoads.reduce((s,l) => s + (l.price || 0), 0).toLocaleString();
-    $("loadRows").innerHTML = cachedLoads.length ? cachedLoads.map(loadRowHtml).join("")
-      : `<tr><td colspan="6" class="hint">No loads yet — post the first one above.</td></tr>`;
-    if (!$("track").classList.contains("hidden")) renderMatches();
-    const recent = [...cachedLoads].slice(0, 5);
-    $("recentRows").innerHTML = recent.length ? recent.map(loadRowHtml).join("")
-      : `<tr><td colspan="6" class="hint">No loads yet — post the first one above.</td></tr>`;
-  } catch (e) {
-    $("loadRows").innerHTML = $("recentRows").innerHTML =
-      `<tr><td colspan="6" class="err">Failed to load: ${esc(e.message)}</td></tr>`;
-    toast("Load board error: " + e.message, true);
-  }
+function normLoad(l) {
+  const km = (l.origin_lat != null && l.dest_lat != null) ? havKm(l.origin_lat, l.origin_lng, l.dest_lat, l.dest_lng) : null;
+  return {
+    pickup_address: l.origin_city, dropoff_address: l.dest_city,
+    miles: km != null ? Math.round(km * 0.621371) : null,
+    weight_lbs: l.weight_kg != null ? Math.round(l.weight_kg * 2.20462) : null,
+    price: l.budget_ghs, status: l.status,
+  };
 }
-$("refreshBtn").onclick = loadLoads;
-$("postLoadBtn").onclick = async () => {
-  $("loadErr").textContent = "";
-  try {
-    await api(ENDPOINTS.loads, {method: "POST", body: JSON.stringify({
-      pickup_address: $("ldPickup").value, dropoff_address: $("ldDropoff").value,
-      weight_lbs: +$("ldWeight").value || null, price: +$("ldPrice").value || null
-    })});
-    ["ldPickup","ldDropoff","ldWeight","ldPrice"].forEach(i => $(i).value = "");
-    loadLoads(); toast("Load posted"); logActivity("Posted a load: " + $("ldPickup").value + " → " + $("ldDropoff").value);
-  } catch (e) { $("loadErr").textContent = e.message; toast("Post failed: " + e.message, true); }
-};
+function loadRowHtml(l) {
+  return `<tr>
+    <td>${esc(l.pickup_address || l.pickup || "")}</td>
+    <td>${esc(l.dropoff_address || l.dropoff || "")}</td>
+    <td>${l.miles ?? "—"}</td>
+    <td>${l.weight_lbs ? l.weight_lbs.toLocaleString() : "—"}</td>
+    <td>${l.price != null ? "₵" + l.price.toLocaleString() : "—"}</td>
+    <td><span class="badge ${l.status || "posted"}">${l.status || "posted"}</span></td>
+  </tr>`;
+}
 
 /* ---------- map ---------- */
 function initMap() {
@@ -1008,7 +1009,13 @@ function calcEarn() {
 ["erLoads","erPrice"].forEach(i => $(i).oninput = calcEarn);
 
 /* ---------- google oauth callback ---------- */
-$("googleBtn").href = API_BASE + "/auth/google/login";
+$("googleBtn").style.display = "none";
+document.querySelectorAll(".divider").forEach(d => d.style.display = "none");
+$("regRoleWrap").onclick = e => {
+  const c = e.target.closest(".fchip"); if (!c) return;
+  regRole = c.dataset.r;
+  document.querySelectorAll("#regRoleWrap .fchip").forEach(x => x.classList.toggle("active", x === c));
+};
 (function handleOAuthRedirect() {
   const params = new URLSearchParams(location.search);
   const t = params.get("token");
@@ -1038,13 +1045,14 @@ let drivers = [], drvFilter = "all", trackedMarker = null, trackTimer = null;
 function normDriver(d) {
   return {
     name: d.name || d.driver_name || "Driver",
-    truck: d.truck_type || d.truck || "Truck",
-    plate: d.plate || d.plate_number || "—",
+    truck: d.truck_type || d.equipment_type || d.truck || "Truck",
+    plate: d.plate_no || d.plate || d.plate_number || "—",
     status: (d.status || "available").toLowerCase().replace(/[\s-]+/g, "_"),
-    location: d.location || d.last_location || "—",
-    lat: d.lat ?? d.latitude ?? null,
-    lng: d.lng ?? d.longitude ?? null,
+    location: d.origin_city || d.location || d.last_location || "—",
+    lat: d.origin_lat ?? d.lat ?? d.latitude ?? null,
+    lng: d.origin_lng ?? d.lng ?? d.longitude ?? null,
   };
+}
 }
 async function loadDrivers() {
   try {
@@ -1094,10 +1102,18 @@ function cityOf(addr) {
   return addr.split(",")[0].trim().toLowerCase();
 }
 function renderMatches() {
-  const loads = cachedLoads.length ? cachedLoads : [
-    {pickup_address:"Accra", dropoff_address:"Kumasi", price:2500, weight_lbs:44000, status:"posted"},
-    {pickup_address:"Tema", dropoff_address:"Takoradi", price:3100, weight_lbs:40000, status:"posted"},
-    {pickup_address:"Kumasi", dropoff_address:"Accra", price:2200, weight_lbs:38000, status:"assigned"},
+  const pickup = $("ldPickup").value.trim(), dropoff = $("ldDropoff").value.trim();
+    const a = geocodeCity(pickup), b = geocodeCity(dropoff);
+    if (!a || !b) throw new Error("Start pickup/dropoff with a known city: Accra, Kumasi, Tema, Takoradi, Tamale, Ho, Cape Coast, Sunyani");
+    if (!$("ldWeight").value) throw new Error("Enter the weight in kg");
+    await api(ENDPOINTS.loads, {method: "POST", body: JSON.stringify({
+      origin_city: pickup, origin_lat: a[0], origin_lng: a[1],
+      dest_city: dropoff, dest_lat: b[0], dest_lng: b[1],
+      equipment_type: $("ldEquip").value,
+      weight_kg: +$("ldWeight").value,
+      budget_ghs: +$("ldPrice").value || null,
+      pickup_time: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    })});
   ];
   const cur = localStorage.getItem("waynook_currency") || "GHS";
   const sym = cur === "GHS" ? "₵" : "$";
