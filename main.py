@@ -300,9 +300,6 @@ def get_matches(load_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Load not found")
     trucks = db.query(models.Truck).filter(models.Truck.owner_id == owner_id).all()
     @app.get("/loads/{load_id}/matches")
-# ---------- matching ----------
-
-@app.get("/loads/{load_id}/matches")
 def get_matches(load_id: int, db: Session = Depends(get_db)):
     load = db.get(models.Load, load_id)
     if load is None or load.status == "cancelled":
