@@ -298,12 +298,6 @@ def get_matches(load_id: int, db: Session = Depends(get_db)):
     load = db.get(models.Load, load_id)
     if load is None or load.status == "cancelled":
         raise HTTPException(status_code=404, detail="Load not found")
-    trucks = db.query(models.Truck).filter(models.Truck.owner_id == owner_id).all()
-@app.get("/loads/{load_id}/matches")
-def get_matches(load_id: int, db: Session = Depends(get_db)):
-    load = db.get(models.Load, load_id)
-    if load is None or load.status == "cancelled":
-        raise HTTPException(status_code=404, detail="Load not found")
     trucks = db.query(models.Truck).all()
     results = matching.compatible_trucks(load, trucks)
     return [
@@ -314,6 +308,8 @@ def get_matches(load_id: int, db: Session = Depends(get_db)):
         }
         for r in results
     ]
+
+
 # ---------- route planner ----------
 
 def _geocode(city: str):
