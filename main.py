@@ -373,3 +373,11 @@ def delete_truck(truck_id: int, db: Session = Depends(get_db), user=Depends(get_
     db.delete(truck)
     db.commit()
     return {"ok": True}
+# ---------- serve frontend ----------
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Frontend not built")
+    return HTMLResponse(index_path.read_text(encoding="utf-8"))
