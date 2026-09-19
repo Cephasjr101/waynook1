@@ -363,16 +363,6 @@ def agent_chat(body: dict, db: Session = Depends(get_db)):
     return {"reply": "I can find loads (\"find a load from Accra to Kumasi\") or price a route (\"price Tema to Tamale\")."}
 
 
-# ---------- trucks: delete ----------
-
-@app.delete("/trucks/{truck_id}")
-def delete_truck(truck_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    truck = _get_owned_truck(truck_id, user, db)
-    if truck.status != "available":
-        raise HTTPException(status_code=400, detail="Assigned trucks cannot be removed")
-    db.delete(truck)
-    db.commit()
-    return {"ok": True}
 # ---------- serve frontend ----------
 
 @app.get("/", response_class=HTMLResponse)
