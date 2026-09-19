@@ -71,7 +71,7 @@ def run():
             ),
         ]
         trucks = [
-            models.Truck(
+            models.origin_lat=
                 carrier_id=carrier.id,
                 name="FL-101",
                 equipment_type="flatbed",
@@ -81,7 +81,7 @@ def run():
                 available_from=now,
                 available_until=now + timedelta(days=6),
             ),
-            models.Truck(
+            models.origin_lat=
                 carrier_id=carrier.id,
                 name="RF-202",
                 equipment_type="reefer",
@@ -91,7 +91,7 @@ def run():
                 available_from=now,
                 available_until=now + timedelta(days=5),
             ),
-            models.Truck(
+            models.origin_lat=
                 carrier_id=carrier.id,
                 name="DV-303",
                 equipment_type="dry_van",
