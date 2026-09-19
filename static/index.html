@@ -200,6 +200,7 @@
   .match .none b { color:var(--bad); font-weight:600; }
 </style>
 <base target="_blank">
+<base target="_blank">
 </head>
 <body>
 
@@ -356,13 +357,8 @@
         </p>
         <h1 id="greeting">Welcome back, <em>driver.</em></h1>
         <p id="greetingSub">Here's what's moving across the board right now.</p>
-        </div> style="display:flex;gap:10px;"
-      <select id="ldEquip" style="width:100%;background:#0d1220;color:var(--txt);border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin-bottom:10px;">
-        <option value="dry_van">Dry van</option><option value="flatbed">Flatbed</option>
-        <option value="reefer">Reefer</option><option value="box_truck">Box truck</option>
-        <option value="tanker">Tanker</option>
-      </select>
-      <button class="btn" id="postLoadBtn">Post load</button>
+        <div style="display:flex;gap:10px;">
+          <button class="btn" data-goto="loads">Post a load</button>
           <button class="ghost" data-goto="agent" style="padding:11px 20px;">Ask the AI dispatcher</button>
         </div>
       </div>
@@ -427,6 +423,11 @@
         <input id="ldWeight" type="number" placeholder="Weight (kg)">
         <input id="ldPrice" type="number" placeholder="Offered price (₵)">
       </div>
+      <select id="ldEquip" style="width:100%;background:#0d1220;color:var(--txt);border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin-bottom:10px;">
+        <option value="dry_van">Dry van</option><option value="flatbed">Flatbed</option>
+        <option value="reefer">Reefer</option><option value="box_truck">Box truck</option>
+        <option value="tanker">Tanker</option>
+      </select>
       <button class="btn" id="postLoadBtn">Post load</button>
       <div class="err" id="loadErr"></div>
     </div>
@@ -443,9 +444,9 @@
   <section id="mapTab" class="tabpage hidden">
     <div class="panel">
       <h2>Route planner</h2>
-      <div><label class="hint">Current city / area</label><input id="ltCity" placeholder="e.g. Accra, Tema, Kumasi…"></div>
-      <div><label class="hint">Capacity (kg)</label><input id="ltCap" type="number" placeholder="e.g. 8000"></div>
-      </div>
+      <div class="row">
+        <input id="mpOrigin" placeholder="Origin (e.g. Accra, Ghana)">
+        <input id="mpDest" placeholder="Destination (e.g. Kumasi, Ghana)">
       </div>
       <button class="btn" id="routeBtn">Get route &amp; distance</button>
       <p class="hint" id="routeInfo" style="margin-top:12px;"></p>
@@ -490,6 +491,7 @@
         </div>
         <div><label class="hint">Plate number</label><input id="ltPlate" placeholder="e.g. GT 4521-24"></div>
         <div><label class="hint">Current city / area</label><input id="ltCity" placeholder="e.g. Accra, Tema, Kumasi…"></div>
+        <div><label class="hint">Capacity (kg)</label><input id="ltCap" type="number" placeholder="e.g. 8000"></div>
       </div>
       <label class="hint">Status</label>
       <div class="filter-bar" id="ltStatus" style="margin-top:4px;">
@@ -665,7 +667,7 @@ function geocodeCity(addr) { const k = (addr || "").split(",")[0].trim().toLower
 function havKm(a, b, c, d) { const R = 6371, rad = x => x * Math.PI / 180; const h = Math.sin(rad(c - a) / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(rad(d - b) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); }
 let regRole = "shipper";
 let token = localStorage.getItem("waynook_token") || "";
-let history = [];
+let chatHistory = [];
 let map, polyline, cachedLoads = [];
 
 function toast(msg, bad=false) {
@@ -692,7 +694,7 @@ function enterApp() {
   loadLoads();
 }
 function exitApp() {
-  token = ""; localStorage.removeItem("waynook_token"); history = []; cachedLoads = [];
+  token = ""; localStorage.removeItem("waynook_token"); chatHistory = []; cachedLoads = [];
   $("hero").classList.remove("hidden");
   $("app").classList.add("hidden");
   $("tabs").classList.add("hidden");
@@ -713,7 +715,7 @@ function syncAvatar() {
 let isRegister = false;
 $("authSwitch").onclick = e => {
   e.preventDefault();
-  isRegister = !isRegister
+  isRegister = !isRegister;
   $("regName").classList.toggle("hidden", !isRegister);
   $("regRoleWrap").classList.toggle("hidden", !isRegister);
   $("authTitle").textContent = isRegister ? "Join Waynook." : "Welcome back, driver.";
@@ -785,16 +787,6 @@ document.querySelectorAll("[data-goto]").forEach(el =>
 $("viewAllBtn").onclick = () => goTab("loads");
 
 /* ---------- loads ---------- */
-function loadRowHtml(l) {
-  return `<tr>
-    <td>${esc(l.pickup_address || l.pickup || "")}</td>
-    <td>${esc(l.dropoff_address || l.dropoff || "")}</td>
-    <td>${l.miles ?? "—"}</td>
-    <td>${l.weight_lbs ? l.weight_lbs.toLocaleString() : "—"}</td>
-    <td>${l.price != null ? "$" + l.price.toLocaleString() : "—"}</td>
-    <td><span class="badge ${l.status || "posted"}">${l.status || "posted"}</span></td>
-  </tr>`;
-}
 function normLoad(l) {
   const km = (l.origin_lat != null && l.dest_lat != null) ? havKm(l.origin_lat, l.origin_lng, l.dest_lat, l.dest_lng) : null;
   return {
@@ -814,6 +806,47 @@ function loadRowHtml(l) {
     <td><span class="badge ${l.status || "posted"}">${l.status || "posted"}</span></td>
   </tr>`;
 }
+async function loadLoads() {
+  try {
+    const loads = await api(ENDPOINTS.loads);
+    const raw = Array.isArray(loads) ? loads : (loads.items || loads.loads || []);
+    cachedLoads = raw.map(normLoad);
+    const active = cachedLoads.filter(l => !["delivered","cancelled"].includes(l.status));
+    $("statLoads").textContent = active.length;
+    $("statMiles").textContent = cachedLoads.reduce((s,l) => s + (l.miles || 0), 0).toLocaleString();
+    $("statValue").textContent = "₵" + cachedLoads.reduce((s,l) => s + (l.price || 0), 0).toLocaleString();
+    $("loadRows").innerHTML = cachedLoads.length ? cachedLoads.map(loadRowHtml).join("")
+      : `<tr><td colspan="6" class="hint">No loads yet — post the first one above.</td></tr>`;
+    if (!$("track").classList.contains("hidden")) renderMatches();
+    const recent = [...cachedLoads].slice(0, 5);
+    $("recentRows").innerHTML = recent.length ? recent.map(loadRowHtml).join("")
+      : `<tr><td colspan="6" class="hint">No loads yet — post the first one above.</td></tr>`;
+  } catch (e) {
+    $("loadRows").innerHTML = $("recentRows").innerHTML =
+      `<tr><td colspan="6" class="err">Failed to load: ${esc(e.message)}</td></tr>`;
+    toast("Load board error: " + e.message, true);
+  }
+}
+$("refreshBtn").onclick = loadLoads;
+$("postLoadBtn").onclick = async () => {
+  $("loadErr").textContent = "";
+  try {
+    const pickup = $("ldPickup").value.trim(), dropoff = $("ldDropoff").value.trim();
+    const a = geocodeCity(pickup), b = geocodeCity(dropoff);
+    if (!a || !b) throw new Error("Start pickup/dropoff with a known city: Accra, Kumasi, Tema, Takoradi, Tamale, Ho, Cape Coast, Sunyani");
+    if (!$("ldWeight").value) throw new Error("Enter the weight in kg");
+    await api(ENDPOINTS.loads, {method: "POST", body: JSON.stringify({
+      origin_city: pickup, origin_lat: a[0], origin_lng: a[1],
+      dest_city: dropoff, dest_lat: b[0], dest_lng: b[1],
+      equipment_type: $("ldEquip").value,
+      weight_kg: +$("ldWeight").value,
+      budget_ghs: +$("ldPrice").value || null,
+      pickup_time: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    })});
+    ["ldPickup","ldDropoff","ldWeight","ldPrice"].forEach(i => $(i).value = "");
+    loadLoads(); toast("Load posted"); logActivity("Posted a load: " + pickup + " → " + dropoff);
+  } catch (e) { $("loadErr").textContent = e.message; toast("Post failed: " + e.message, true); }
+};
 
 /* ---------- map ---------- */
 function initMap() {
@@ -872,9 +905,9 @@ async function sendChat() {
   $("chatInput").value = ""; $("chatErr").textContent = "";
   addMsg(q, "user");
   try {
-    const d = await api(ENDPOINTS.chat, {method: "POST", body: JSON.stringify({message: q, history})});
+    const d = await api(ENDPOINTS.chat, {method: "POST", body: JSON.stringify({message: q, history: chatHistory})});
     const reply = d.reply || d.response || JSON.stringify(d);
-    history.push({role: "user", content: q}, {role: "assistant", content: reply});
+    chatHistory.push({role: "user", content: q}, {role: "assistant", content: reply});
     addMsg(reply, "bot");
   } catch (e) { $("chatErr").textContent = e.message; addMsg("(error — " + e.message + ")", "bot"); }
 }
@@ -1008,7 +1041,7 @@ function calcEarn() {
 }
 ["erLoads","erPrice"].forEach(i => $(i).oninput = calcEarn);
 
-/* ---------- google oauth callback ---------- */
+/* ---------- google oauth (hidden — not implemented on backend) ---------- */
 $("googleBtn").style.display = "none";
 document.querySelectorAll(".divider").forEach(d => d.style.display = "none");
 $("regRoleWrap").onclick = e => {
@@ -1052,7 +1085,6 @@ function normDriver(d) {
     lat: d.origin_lat ?? d.lat ?? d.latitude ?? null,
     lng: d.origin_lng ?? d.lng ?? d.longitude ?? null,
   };
-}
 }
 async function loadDrivers() {
   try {
@@ -1102,18 +1134,10 @@ function cityOf(addr) {
   return addr.split(",")[0].trim().toLowerCase();
 }
 function renderMatches() {
-  const pickup = $("ldPickup").value.trim(), dropoff = $("ldDropoff").value.trim();
-    const a = geocodeCity(pickup), b = geocodeCity(dropoff);
-    if (!a || !b) throw new Error("Start pickup/dropoff with a known city: Accra, Kumasi, Tema, Takoradi, Tamale, Ho, Cape Coast, Sunyani");
-    if (!$("ldWeight").value) throw new Error("Enter the weight in kg");
-    await api(ENDPOINTS.loads, {method: "POST", body: JSON.stringify({
-      origin_city: pickup, origin_lat: a[0], origin_lng: a[1],
-      dest_city: dropoff, dest_lat: b[0], dest_lng: b[1],
-      equipment_type: $("ldEquip").value,
-      weight_kg: +$("ldWeight").value,
-      budget_ghs: +$("ldPrice").value || null,
-      pickup_time: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-    })});
+  const loads = cachedLoads.length ? cachedLoads : [
+    {pickup_address:"Accra", dropoff_address:"Kumasi", price:2500, weight_lbs:44000, status:"posted"},
+    {pickup_address:"Tema", dropoff_address:"Takoradi", price:3100, weight_lbs:40000, status:"posted"},
+    {pickup_address:"Kumasi", dropoff_address:"Accra", price:2200, weight_lbs:38000, status:"assigned"},
   ];
   const cur = localStorage.getItem("waynook_currency") || "GHS";
   const sym = cur === "GHS" ? "₵" : "$";
@@ -1156,7 +1180,7 @@ function renderMyTrucks() {
   $("ltMine").querySelectorAll("[data-deltruck]").forEach(b => b.onclick = async () => {
     const mine2 = getLocalTrucks(); const t = mine2.splice(+b.dataset.deltruck, 1)[0];
     localStorage.setItem("waynook_local_trucks", JSON.stringify(mine2));
-    if (t.id) { try { await api("/trucks/" + t.id, {method: "DELETE"}); } catch {} }
+    if (t.id && /^\d+$/.test(String(t.id))) { try { await api("/trucks/" + t.id, {method: "DELETE"}); } catch {} }
     renderMyTrucks(); loadDrivers(); toast("Truck removed from the board");
   });
 }
@@ -1181,24 +1205,43 @@ $("ltSubmit").onclick = async () => {
   $("ltErr").textContent = "";
   const name = $("ltName").value.trim(), plate = $("ltPlate").value.trim(), city = $("ltCity").value.trim();
   if (!name || !plate || !city) return $("ltErr").textContent = "Name, plate and city are required.";
-  const truck = {
-    id: "local-" + Date.now(),
-    name, truck: $("ltType").value, plate,
-    status: ltStatus, location: city,
-    lat: ltPos ? ltPos.lat : (DEMO_CITIES[city.toLowerCase()]?.lat ?? null),
-    lng: ltPos ? ltPos.lng : (DEMO_CITIES[city.toLowerCase()]?.lng ?? null),
+  if (!$("ltCap").value) return $("ltErr").textContent = "Enter your truck capacity in kg.";
+  const c = geocodeCity(city) || DEMO_CITIES[city.toLowerCase()];
+  if (!c) return $("ltErr").textContent = "Unknown city. Use: Accra, Kumasi, Tema, Takoradi or Tamale.";
+  const lat = c.lat ?? c[0], lng = c.lng ?? c[1];
+  const EQUIP = { "Box truck":"dry_van", "Trailer":"flatbed", "Semi":"flatbed", "Delivery van":"dry_van", "Tanker":"tanker", "Flatbed":"flatbed" };
+  const apiBody = {
+    name, plate_no: plate,
+    equipment_type: EQUIP[$("ltType").value] || "dry_van",
+    capacity_kg: +$("ltCap").value,
+    origin_city: city, origin_lat: lat, origin_lng: lng,
+    available_from: new Date().toISOString(),
+    available_until: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
   };
-  // try the real API first; local copy guarantees instant visibility either way
+  // try the real API first (requires a signed-in Carrier account); local copy keeps it visible either way
   try {
-    const r = await api("/trucks", {method: "POST", body: JSON.stringify(truck)});
-    if (r && (r.id || r.truck_id)) truck.id = r.id || r.truck_id;
-  } catch {}
-  const mine = getLocalTrucks(); mine.push(truck);
-  localStorage.setItem("waynook_local_trucks", JSON.stringify(mine));
-  ["ltName","ltPlate","ltCity"].forEach(i => $(i).value = "");
+    const r = await api("/trucks", {method: "POST", body: JSON.stringify(apiBody)});
+    if (r && r.id) {
+      const mine = getLocalTrucks();
+      mine.push({id: r.id, name, truck: $("ltType").value, plate, status: ltStatus, location: city, lat, lng});
+      localStorage.setItem("waynook_local_trucks", JSON.stringify(mine));
+      ["ltName","ltPlate","ltCity","ltCap"].forEach(i => $(i).value = "");
+      renderMyTrucks(); loadDrivers();
+      logActivity("Listed truck " + plate + " in " + city);
+      toast("You're live — customers can see and track you now");
+      return goTab("track");
+    }
+  } catch (e) {
+    toast("Not published to server: " + e.message, true);
+  }
+  // local fallback (guest or shipper account)
+  const truck = { id: "local-" + Date.now(), name, truck: $("ltType").value, plate, status: ltStatus, location: city, lat, lng };
+  const mine = getLocalTrucks();
+  if (!mine.some(t => t.plate === plate)) { mine.push(truck); localStorage.setItem("waynook_local_trucks", JSON.stringify(mine)); }
+  ["ltName","ltPlate","ltCity","ltCap"].forEach(i => $(i).value = "");
   renderMyTrucks(); loadDrivers();
   logActivity("Listed truck " + plate + " in " + city);
-  toast("You're live — customers can see and track you now");
+  toast("Saved locally — sign in as a Carrier to publish to the board");
   goTab("track");
 };
 
