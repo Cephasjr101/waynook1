@@ -314,3 +314,66 @@ def get_matches(load_id: int, db: Session = Depends(get_db)):
         }
         for r in results
     ]
+# ---------- route planner ----------
+
+def _geocode(city: str):
+    key = city.split(",")[0].strip().lower()
+    return matching.CITY_COORDS.get(key)
+
+
+@app.get("/maps/directions")
+def get_directions(origin: str, destination: str):
+    a, b = _geocode(origin), _geocode(destination)
+    if a is None or b is None:
+        known = ", ".join(sorted(matching.CITY_COORDS))
+        raise HTTPException(status_code=404, detail=f"Unknown city. Known cities: {known}")
+    km = matching.haversine_km(a[0], a[1], b[0], b[1])
+    return {
+        "summary": f"{origin.strip()} → {destination.strip()}",
+        "legs": [{
+            "distance": {"text": f"{km:.0f} km ({km * 0.621371:.0f} mi)"},
+            "duration": {"text": f"{km / 60:.1f} hrs"},
+        }],
+    }
+
+
+# ---------- AI dispatcher (rule-based) ----------
+
+@app.post("/agent/chat")
+def agent_chat(body: dict, db: Session = Depends(get_db)):
+    msg = (body.get("message") or "").lower()
+    loads = db.query(models.Load).filter(models.Load.status == "open").all()
+    cities = [c for c in matching.CITY_COORDS if c in msg]
+
+    if "price" in msg or "rate" in msg or "cost" in msg:
+        if len(cities) >= 2:
+            a, b = _geocode(cities[0]), _geocode(cities[1])
+            km = matching.haversine_km(a[0], a[1], b[0], b[1])
+            est = matching.estimate_price_ghs(km, None)
+            return {"reply": f"{cities[0].title()} → {cities[1].title()} is roughly {km:.0f} km. Estimated haul price: ₵{est:,.0f} (₵5/km, ₵300 minimum)."}
+        return {"reply": "Tell me the route and I'll price it — e.g. \"price Accra to Kumasi\"."}
+
+    if "load" in msg or "find" in msg or "freight" in msg:
+        matched = [l for l in loads if not cities or any(c in l.origin_city.lower() for c in cities)]
+        if not matched:
+            return {"reply": "No open loads match that right now — try another city or post one from the Loads tab."}
+        lines = [
+            f"• {l.title or 'Load'}: {l.origin_city} → {l.dest_city}, {l.weight_kg:,.0f} kg"
+            + (f", budget ₵{l.budget_ghs:,.0f}" if l.budget_ghs else "")
+            for l in matched[:5]
+        ]
+        return {"reply": f"{len(matched)} open load(s) on the board:\n" + "\n".join(lines)}
+
+    return {"reply": "I can find loads (\"find a load from Accra to Kumasi\") or price a route (\"price Tema to Tamale\")."}
+
+
+# ---------- trucks: delete ----------
+
+@app.delete("/trucks/{truck_id}")
+def delete_truck(truck_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    truck = _get_owned_truck(truck_id, user, db)
+    if truck.status != "available":
+        raise HTTPException(status_code=400, detail="Assigned trucks cannot be removed")
+    db.delete(truck)
+    db.commit()
+    return {"ok": True}
